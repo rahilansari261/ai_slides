@@ -1,0 +1,87 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Template metadata (matches FastAPI TemplateModel)
+// All templates use TemplateMetadata and PresentationLayoutCode
+model TemplateMetadata {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  layouts     PresentationLayoutCode[]
+
+  @@map("template_metadata")
+}
+
+model PresentationLayoutCode {
+  id          Int      @id @default(autoincrement())
+  presentation String   @map("presentation")
+  layoutId    String   @map("layout_id")
+  layoutName  String   @map("layout_name")
+  layoutCode  String   @db.Text @map("layout_code")
+  fonts       Json?    @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  template   TemplateMetadata @relation(fields: [presentation], references: [id], onDelete: Cascade)
+
+  @@unique([presentation, layoutId])
+  @@index([presentation])
+  @@map("presentation_layout_codes")
+}
+
+// Presentation model matching FastAPI PresentationModel
+model Presentation {
+  id                      String   @id @default(uuid())
+  content                 String
+  nSlides                 Int      @map("n_slides")
+  language                String
+  title                   String?
+  filePaths               Json?    @map("file_paths")
+  outlines                Json?
+  layout                  Json?
+  structure               Json?
+  instructions            String?
+  tone                    String?
+  verbosity               String?
+  includeTableOfContents  Boolean  @default(false) @map("include_table_of_contents")
+  includeTitleSlide       Boolean  @default(true) @map("include_title_slide")
+  webSearch               Boolean  @default(false) @map("web_search")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  slides                  Slide[]
+
+  @@map("presentations")
+}
+
+// Slide model matching FastAPI SlideModel
+model Slide {
+  id            String   @id @default(uuid())
+  presentation  String
+  layoutGroup   String   @map("layout_group")
+  layout        String
+  index         Int
+  speakerNote   String?  @map("speaker_note")
+  content       Json
+  htmlContent   String?  @map("html_content")
+  properties    Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  presentationRef Presentation @relation(fields: [presentation], references: [id], onDelete: Cascade)
+
+  @@index([presentation])
+  @@map("slides")
+}
+

@@ -1,0 +1,22 @@
+services:
+  libreoffice:
+    image: lscr.io/linuxserver/libreoffice:latest
+    container_name: ai_slides_libreoffice
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      # Mount backend temp directory for processing files
+      - ./backend/temp:/tmp/processing
+      # Mount backend app_data for images (if needed)
+      - ./backend/app_data:/app_data
+    command: tail -f /dev/null  # Keep container running
+    networks:
+      - ai_slides_network
+    restart: unless-stopped
+
+networks:
+  ai_slides_network:
+    driver: bridge
+

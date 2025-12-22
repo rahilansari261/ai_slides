@@ -1,0 +1,13 @@
+/nextjs
+/fastapi
+/backend/.env
+/backend/node_modules
+/backend/presentations
+/backend/uploads
+/backend/temp
+/backend/app_data
+
+/frontend/node_modules
+/frontend/.env
+/frontend/.next
+
