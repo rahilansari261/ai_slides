@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Outfit, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { QueryProvider } from '@/providers/QueryProvider';
+import { ReduxProvider } from '@/providers/ReduxProvider';
 
 const outfit = Outfit({
   subsets: ['latin'],
@@ -28,9 +29,11 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`${outfit.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
-        <QueryProvider>
-          {children}
-        </QueryProvider>
+        <ReduxProvider>
+          <QueryProvider>
+            {children}
+          </QueryProvider>
+        </ReduxProvider>
       </body>
     </html>
   );

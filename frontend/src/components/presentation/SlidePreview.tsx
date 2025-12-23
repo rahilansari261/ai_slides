@@ -172,6 +172,15 @@ function ContentSlide({ slide, theme, mini }: { slide: Slide; theme: Theme; mini
   const imageUrl = slide.image || slide.imageUrl || (slide as any).image_url;
   const hasImage = imageUrl && typeof imageUrl === 'string';
   
+  // Check if there's raw content that hasn't been processed into displayText or displayBullets
+  const hasContent = slide.content && !displayText && displayBullets.length === 0 && (
+    (typeof slide.content === 'string' && slide.content.trim().length > 0) ||
+    (typeof slide.content === 'object' && (slide.content as any).content && typeof (slide.content as any).content === 'string' && (slide.content as any).content.trim().length > 0)
+  );
+  const rawContent = typeof slide.content === 'string' 
+    ? slide.content 
+    : (typeof slide.content === 'object' ? ((slide.content as any).content || (slide.content as any).text || '') : '');
+  
   // For full-size slides with images, use two-column layout
   if (!mini && hasImage && (displayTitle || displayText || displayBullets.length > 0)) {
     return (

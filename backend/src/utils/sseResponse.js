@@ -58,9 +58,12 @@ export class SSECompleteResponse {
   }
 
   toString() {
+    // Match FastAPI format: { "type": "complete", key: value }
+    const data = { type: 'complete' };
+    data[this.key] = this.value;
     return new SSEResponse(
       'response',
-      JSON.stringify({ type: 'complete', [this.key]: this.value })
+      JSON.stringify(data)
     ).toString();
   }
 }

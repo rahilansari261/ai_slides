@@ -74,6 +74,7 @@ export function CreatePresentationModal({ isOpen, onClose, onSuccess }: CreatePr
   const [generatedSlides, setGeneratedSlides] = useState<any[]>([]);
   const [presentationWithOutlines, setPresentationWithOutlines] = useState<Presentation | null>(null);
   const [presentationId, setPresentationId] = useState<string | null>(null);
+  const [isPrepared, setIsPrepared] = useState(false); // Track if presentation is prepared and ready to stream
   const eventSourceRef = useRef<EventSource | null>(null);
   
   const [formData, setFormData] = useState({
@@ -210,40 +211,68 @@ export function CreatePresentationModal({ isOpen, onClose, onSuccess }: CreatePr
 
     setLoading(true);
     setError('');
+    setIsPrepared(false);
     setStep(5); // Move to generating slides step
-      setGenerationMessage('Preparing presentation with template...');
-      setGenerationStep(3);
-      setGeneratedSlides([]);
+    setGenerationMessage('Preparing presentation with template...');
+    setGenerationStep(3);
+    setGeneratedSlides([]);
 
-      // Clean up any existing event sources
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
+    // Clean up any existing event sources
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    try {
+      // Extract outlines
+      let outlinesArray: any[] = [];
+      if (presentationWithOutlines.outlines) {
+        if (Array.isArray(presentationWithOutlines.outlines)) {
+          outlinesArray = presentationWithOutlines.outlines;
+        } else if (presentationWithOutlines.outlines.slides) {
+          outlinesArray = presentationWithOutlines.outlines.slides;
+        }
       }
 
-      try {
-        // Extract outlines
-        let outlinesArray: any[] = [];
-        if (presentationWithOutlines.outlines) {
-          if (Array.isArray(presentationWithOutlines.outlines)) {
-            outlinesArray = presentationWithOutlines.outlines;
-          } else if (presentationWithOutlines.outlines.slides) {
-            outlinesArray = presentationWithOutlines.outlines.slides;
-          }
-        }
+      // Step 3: Prepare with template
+      const templateName = formData.templateId;
+      const preparedPresentation = await preparePresentationStep(
+        presentationId,
+        outlinesArray,
+        templateName,
+        formData.topic
+      );
 
-        // Step 3: Prepare with template
-        const templateName = formData.templateId;
-        const preparedPresentation = await preparePresentationStep(
-          presentationId,
-          outlinesArray,
-          templateName,
-          formData.topic
-        );
+      // Prepare is complete, show button to stream
+      setGenerationMessage('Presentation prepared! Click "Stream Slides" to generate slides.');
+      setGenerationStep(4);
+      setIsPrepared(true);
+      setLoading(false);
+    } catch (err: any) {
+      setError(err.message || 'Failed to prepare presentation');
+      setLoading(false);
+      setIsPrepared(false);
+    }
+  };
 
-        setGenerationMessage('Generating slides...');
-        setGenerationStep(4);
+  const handleStreamSlides = async () => {
+    if (!presentationId) {
+      setError('Missing presentation data. Please start over.');
+      return;
+    }
 
+    setLoading(true);
+    setError('');
+    setGenerationMessage('Generating slides...');
+    setGeneratedSlides([]);
+
+    // Clean up any existing event sources
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    try {
       // Step 4: Stream slide generation
       await new Promise<void>((resolve, reject) => {
         const eventSource = streamSlidesStep(
@@ -265,7 +294,6 @@ export function CreatePresentationModal({ isOpen, onClose, onSuccess }: CreatePr
             onError: (errorMessage) => {
               setError(errorMessage);
               setLoading(false);
-              setStep(4); // Go back to template selection
               reject(new Error(errorMessage));
             },
           }
@@ -273,9 +301,8 @@ export function CreatePresentationModal({ isOpen, onClose, onSuccess }: CreatePr
         eventSourceRef.current = eventSource;
       });
     } catch (err: any) {
-      setError(err.message || 'Failed to generate presentation');
+      setError(err.message || 'Failed to stream slides');
       setLoading(false);
-      setStep(4); // Go back to template selection
     }
   };
 
@@ -287,6 +314,10 @@ export function CreatePresentationModal({ isOpen, onClose, onSuccess }: CreatePr
     }
     setStep(1);
     setError('');
+    setIsPrepared(false);
+    setGenerationStep(0);
+    setGenerationMessage('');
+    setGeneratedSlides([]);
     setGenerationStep(0);
     setGenerationMessage('');
     setGeneratedSlides([]);
@@ -738,21 +769,52 @@ export function CreatePresentationModal({ isOpen, onClose, onSuccess }: CreatePr
                   className="p-6"
                 >
                   <div className="flex flex-col items-center justify-center py-12 space-y-6">
-                    <div className="relative">
-                      <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                        <Loader2 className="w-10 h-10 text-white animate-spin" />
+                    {(!isPrepared || (isPrepared && loading)) && (
+                      <div className="relative">
+                        <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
+                          <Loader2 className="w-10 h-10 text-white animate-spin" />
+                        </div>
+                        <motion.div
+                          className="absolute inset-0 rounded-full border-4 border-primary/20"
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                        />
                       </div>
+                    )}
+
+                    {isPrepared && !loading && (
                       <motion.div
-                        className="absolute inset-0 rounded-full border-4 border-primary/20"
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                      />
-                    </div>
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        className="w-20 h-20 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center"
+                      >
+                        <Check className="w-10 h-10 text-white" />
+                      </motion.div>
+                    )}
 
                     <div className="text-center space-y-2">
-                      <h3 className="text-xl font-bold">Generating Presentation</h3>
+                      <h3 className="text-xl font-bold">
+                        {isPrepared && !loading 
+                          ? 'Ready to Generate Slides' 
+                          : isPrepared && loading
+                          ? 'Generating Slides'
+                          : 'Preparing Presentation'}
+                      </h3>
                       <p className="text-muted-foreground">{generationMessage || 'Please wait...'}</p>
                     </div>
+
+                    {isPrepared && !loading && (
+                      <motion.button
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        onClick={handleStreamSlides}
+                        disabled={loading}
+                        className="inline-flex items-center gap-2 px-8 py-3 bg-gradient-to-r from-primary to-secondary rounded-xl font-medium text-white shadow-lg hover:shadow-primary/25 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      >
+                        <Sparkles className="w-5 h-5" />
+                        Stream Slides
+                      </motion.button>
+                    )}
 
                     {/* Progress Steps */}
                     <div className="w-full max-w-md space-y-4">
@@ -884,12 +946,12 @@ export function CreatePresentationModal({ isOpen, onClose, onSuccess }: CreatePr
                     {loading ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
-                        Generating...
+                        Preparing...
                       </>
                     ) : (
                       <>
-                        <Sparkles className="w-5 h-5" />
-                        Generate Presentation
+                        <Layout className="w-5 h-5" />
+                        Prepare Presentation
                       </>
                     )}
                   </button>

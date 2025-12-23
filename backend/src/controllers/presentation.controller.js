@@ -152,8 +152,32 @@ export const getPresentation = async (req, res) => {
       return res.status(404).json({ error: 'Presentation not found' });
     }
 
+    // Format response to match FastAPI PresentationWithSlides format
+    const presentationWithSlides = {
+      id: presentation.id,
+      content: presentation.content,
+      n_slides: presentation.nSlides,
+      language: presentation.language,
+      title: presentation.title,
+      created_at: presentation.createdAt,
+      updated_at: presentation.updatedAt,
+      tone: presentation.tone,
+      verbosity: presentation.verbosity,
+      slides: presentation.slides.map(slide => ({
+        id: slide.id,
+        presentation: slide.presentation,
+        layout_group: slide.layoutGroup,
+        layout: slide.layout,
+        index: slide.index,
+        speaker_note: slide.speakerNote,
+        content: slide.content,
+        html_content: slide.htmlContent,
+        properties: slide.properties
+      }))
+    };
+    
     // Return presentation with slides (matching FastAPI PresentationWithSlides)
-    res.json(presentation);
+    res.json(presentationWithSlides);
   } catch (error) {
     console.error('Error getting presentation:', error);
     res.status(500).json({ error: error.message });
@@ -700,16 +724,17 @@ export const streamPresentation = async (req, res) => {
             presentation.instructions
           );
 
-          // Ensure layoutGroup includes custom- prefix for custom templates
-          // The layout name should already have the custom- prefix from preparePresentation
+          // Create slide matching FastAPI SlideModel format exactly
           const slide = {
             id: uuidv4(),
             presentation: id,
-            layoutGroup: layout.name, // Layout name should already include custom- prefix
+            layout_group: layout.name, // Layout name should already include custom- prefix
             layout: slideLayout.id,
             index: i,
-            speakerNote: slideContent.__speaker_note__ || '',
-            content: slideContent
+            speaker_note: slideContent.__speaker_note__ || '',
+            content: slideContent,
+            html_content: null, // Will be set below
+            properties: null
           };
 
           // Add placeholder assets
@@ -718,19 +743,22 @@ export const streamPresentation = async (req, res) => {
           // Generate HTML content for the slide
           try {
             const htmlContent = await generateSlideHtml(slide, slideLayout, layout);
-            slide.htmlContent = htmlContent;
+            slide.html_content = htmlContent;
           } catch (htmlError) {
             console.warn(`Error generating HTML for slide ${i}:`, htmlError);
             // Continue without HTML if generation fails
-            slide.htmlContent = null;
+            slide.html_content = null;
           }
 
           slides.push(slide);
 
-          // Stream the slide
+          // Stream the slide - send slide JSON directly as chunk (matching FastAPI slide.model_dump_json())
+          // Add comma after each slide except the last one
+          const slideJson = JSON.stringify(slide);
+          const comma = i < structure.slides.length - 1 ? ',' : '';
           res.write(new SSEResponse(
             'response',
-            JSON.stringify({ type: 'chunk', chunk: JSON.stringify(slide) })
+            JSON.stringify({ type: 'chunk', chunk: slideJson + comma })
           ).toString());
         } catch (error) {
           console.error(`Error generating slide ${i}:`, error);
@@ -755,17 +783,17 @@ export const streamPresentation = async (req, res) => {
         where: { presentation: id }
       });
 
-      // Save new slides with HTML content
+      // Save new slides with HTML content (matching Prisma schema)
       await prisma.slide.createMany({
         data: slides.map(slide => ({
           id: slide.id,
           presentation: slide.presentation,
-          layoutGroup: slide.layoutGroup,
+          layoutGroup: slide.layout_group,
           layout: slide.layout,
           index: slide.index,
-          speakerNote: slide.speakerNote,
+          speakerNote: slide.speaker_note,
           content: slide.content,
-          htmlContent: slide.htmlContent || null
+          htmlContent: slide.html_content || null
         }))
       });
 
@@ -775,10 +803,34 @@ export const streamPresentation = async (req, res) => {
         include: { slides: true }
       });
 
-      // Send complete response
+      // Format response to match FastAPI PresentationWithSlides format
+      const presentationWithSlides = {
+        id: updatedPresentation.id,
+        content: updatedPresentation.content,
+        n_slides: updatedPresentation.nSlides,
+        language: updatedPresentation.language,
+        title: updatedPresentation.title,
+        created_at: updatedPresentation.createdAt,
+        updated_at: updatedPresentation.updatedAt,
+        tone: updatedPresentation.tone,
+        verbosity: updatedPresentation.verbosity,
+        slides: slides.map(slide => ({
+          id: slide.id,
+          presentation: slide.presentation,
+          layout_group: slide.layout_group,
+          layout: slide.layout,
+          index: slide.index,
+          speaker_note: slide.speaker_note,
+          content: slide.content,
+          html_content: slide.html_content,
+          properties: slide.properties
+        }))
+      };
+
+      // Send complete response matching FastAPI format
       res.write(new SSECompleteResponse(
         'presentation',
-        updatedPresentation
+        presentationWithSlides
       ).toString());
 
       res.end();
