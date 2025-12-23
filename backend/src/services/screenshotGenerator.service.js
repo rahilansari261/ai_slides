@@ -34,10 +34,21 @@ function createFontAliasConfig(rawFonts, tempDir) {
 
   const fontsConfPath = path.join(tempDir, `fonts_alias_${Date.now()}.conf`);
   
+  // Create a self-contained fontconfig file that doesn't require /etc/fonts/fonts.conf
+  // This avoids issues when the default config file is not available in the container
   let configContent = `<?xml version='1.0'?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
 <fontconfig>
-  <include>/etc/fonts/fonts.conf</include>
+  <!-- Font directories -->
+  <dir>/usr/share/fonts</dir>
+  <dir>/usr/local/share/fonts</dir>
+  <dir>~/.fonts</dir>
+  
+  <!-- Font cache directories -->
+  <cachedir>/var/cache/fontconfig</cachedir>
+  <cachedir>~/.fontconfig</cachedir>
+  
+  <!-- Font alias mappings -->
 `;
 
   for (const [src, dst] of Object.entries(mappings)) {
@@ -357,13 +368,48 @@ async function convertPptxToPdfWithLibreOffice(pptxPath, outputDir, slideXMLs = 
       throw new Error(`Failed to verify PPTX file in container: ${verifyError.message}`);
     }
 
-    // If font config exists, calculate its container path and set FONTCONFIG_FILE
+    // If font config exists, calculate its container path and verify it exists
     let containerFontsConfPath = null;
     if (fontsConfPath) {
       const fontsConfRelativePath = path.relative(tempRoot, fontsConfPath);
       containerFontsConfPath = fontsConfRelativePath
         ? `/tmp/processing/${fontsConfRelativePath.replace(/\\/g, '/')}`
         : `/tmp/processing/${path.basename(fontsConfPath)}`;
+      
+      // Verify font config file exists in container before using it
+      try {
+        const verifyFontConfigCommand = `docker exec ${LIBREOFFICE_CONTAINER} sh -c "test -f '${containerFontsConfPath}' && echo 'EXISTS' || echo 'NOT_FOUND'"`;
+        const { stdout: fontConfigCheck } = await execAsync(verifyFontConfigCommand);
+        
+        if (fontConfigCheck.trim() !== 'EXISTS') {
+          console.warn(`[ScreenshotGenerator] Font config file not found in container at ${containerFontsConfPath}, attempting to copy...`);
+          
+          // Try to copy the font config file to the container
+          try {
+            const dockerCpCommand = `docker cp "${fontsConfPath}" ${LIBREOFFICE_CONTAINER}:${containerFontsConfPath}`;
+            await execAsync(dockerCpCommand);
+            
+            // Verify it was copied successfully
+            await new Promise(resolve => setTimeout(resolve, 200));
+            const { stdout: verifyAfterCopy } = await execAsync(verifyFontConfigCommand);
+            
+            if (verifyAfterCopy.trim() !== 'EXISTS') {
+              console.warn(`[ScreenshotGenerator] Failed to copy font config to container, proceeding without FONTCONFIG_FILE`);
+              containerFontsConfPath = null;
+            } else {
+              console.log(`[ScreenshotGenerator] Successfully copied font config to container`);
+            }
+          } catch (copyError) {
+            console.warn(`[ScreenshotGenerator] Could not copy font config to container: ${copyError.message}, proceeding without FONTCONFIG_FILE`);
+            containerFontsConfPath = null;
+          }
+        } else {
+          console.log(`[ScreenshotGenerator] Font config file verified in container: ${containerFontsConfPath}`);
+        }
+      } catch (verifyError) {
+        console.warn(`[ScreenshotGenerator] Could not verify font config in container: ${verifyError.message}, proceeding without FONTCONFIG_FILE`);
+        containerFontsConfPath = null;
+      }
     }
 
     console.log('[ScreenshotGenerator] Starting LibreOffice PDF conversion via Docker...');
@@ -374,6 +420,8 @@ async function convertPptxToPdfWithLibreOffice(pptxPath, outputDir, slideXMLs = 
     console.log(`[ScreenshotGenerator] Output dir in container: ${containerOutputDir}`);
     if (containerFontsConfPath) {
       console.log(`[ScreenshotGenerator] Font config in container: ${containerFontsConfPath}`);
+    } else {
+      console.log(`[ScreenshotGenerator] No font config will be used (file not available in container)`);
     }
 
     // Ensure output directory is writable in container
@@ -411,13 +459,22 @@ async function convertPptxToPdfWithLibreOffice(pptxPath, outputDir, slideXMLs = 
       
       // LibreOffice may output errors to stderr even on partial success
       if (stderr) {
+        // Fontconfig errors are typically non-fatal warnings that don't prevent conversion
+        const isFontconfigError = stderrLower.includes('fontconfig error') || 
+                                   stderrLower.includes('fontconfig:');
+        
+        // Check for actual fatal errors
         if (stderrLower.includes('error: source file could not be loaded') ||
             stderrLower.includes('could not be loaded') ||
-            (stderrLower.includes('error') && !stderrLower.includes('application'))) {
+            (stderrLower.includes('error') && !stderrLower.includes('application') && !isFontconfigError)) {
           console.error('[ScreenshotGenerator] LibreOffice conversion error detected:', stderr);
           throw new Error(`LibreOffice conversion failed: ${stderr}`);
         } else {
-          console.warn('[ScreenshotGenerator] LibreOffice warnings (non-fatal):', stderr);
+          if (isFontconfigError) {
+            console.warn('[ScreenshotGenerator] Fontconfig warning (non-fatal, ignoring):', stderr);
+          } else {
+            console.warn('[ScreenshotGenerator] LibreOffice warnings (non-fatal):', stderr);
+          }
         }
       }
       
