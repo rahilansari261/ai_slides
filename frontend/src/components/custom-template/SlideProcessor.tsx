@@ -147,11 +147,16 @@ export default function SlideProcessor({ processingData, onBack }: SlideProcesso
 
   const convertAllSlides = async () => {
     setConverting(true);
-    for (let i = 0; i < slides.length; i++) {
-      if (!slides[i].completed) {
-        await convertSlideToHTML(i);
-      }
-    }
+    
+    // Create promises for all slides that need conversion
+    const conversionPromises = slides
+      .map((slide, index) => ({ slide, index }))
+      .filter(({ slide }) => !slide.completed)
+      .map(({ index }) => convertSlideToHTML(index));
+
+    // Run all conversions in parallel
+    await Promise.allSettled(conversionPromises);
+    
     setConverting(false);
   };
 
